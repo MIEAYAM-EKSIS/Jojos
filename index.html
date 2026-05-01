@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORA ORA ORA — JoJo Pose Detector</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Black+Han+Sans&family=Oswald:wght@700&display=swap');
+
+  :root {
+    --gold: #FFD700;
+    --purple: #6B0AC9;
+    --dark-purple: #1a0033;
+    --cyan: #00FFFF;
+    --magenta: #FF00AA;
+    --bg: #0a0010;
+    --panel: rgba(30,0,60,0.85);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: #fff;
+    font-family: 'Bebas Neue', cursive;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Manga panel background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      repeating-linear-gradient(45deg, transparent, transparent 60px, rgba(107,10,201,0.04) 60px, rgba(107,10,201,0.04) 62px),
+      repeating-linear-gradient(-45deg, transparent, transparent 60px, rgba(0,255,255,0.03) 60px, rgba(0,255,255,0.03) 62px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Speed lines radial */
+  .speed-lines {
+    position: fixed;
+    inset: 0;
+    background: repeating-conic-gradient(
+      from 0deg at 50% 50%,
+      rgba(255,215,0,0.03) 0deg,
+      transparent 1.5deg,
+      transparent 3deg
+    );
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .speed-lines.active { opacity: 1; animation: spin-lines 8s linear infinite; }
+  @keyframes spin-lines { to { transform: rotate(360deg); } }
+
+  #app {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    max-width: 900px;
+    padding: 10px;
+    height: 100vh;
+    justify-content: center;
+  }
+
+  /* Title */
+  .title-block {
+    text-align: center;
+    line-height: 0.9;
+    position: relative;
+  }
+  .title-main {
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    color: var(--gold);
+    text-shadow: 4px 4px 0 var(--purple), -2px -2px 0 #000, 0 0 40px rgba(255,215,0,0.5);
+    letter-spacing: 4px;
+    animation: title-flicker 4s infinite;
+  }
+  .title-sub {
+    font-size: clamp(0.9rem, 2.5vw, 1.3rem);
+    color: var(--cyan);
+    letter-spacing: 8px;
+    text-shadow: 0 0 10px var(--cyan);
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+  }
+  @keyframes title-flicker {
+    0%,95%,100% { opacity:1; } 96% { opacity:0.8; } 97% { opacity:1; } 98% { opacity:0.6; }
+  }
+
+  /* Main layout */
+  .main-layout {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  /* Camera container */
+  .camera-wrap {
+    position: relative;
+    flex: 1;
+    border: 3px solid var(--gold);
+    box-shadow: 0 0 0 2px #000, 0 0 30px rgba(255,215,0,0.3), inset 0 0 30px rgba(107,10,201,0.2);
+    border-radius: 2px;
+    overflow: hidden;
+    background: #000;
+    aspect-ratio: 4/3;
+    max-height: 45vh;
+  }
+
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    display: block;
+  }
+
+  #canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    transform: scaleX(-1);
+    pointer-events: none;
+  }
+
+  /* Manga corner decorations */
+  .camera-wrap::before, .camera-wrap::after {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    border-color: var(--cyan);
+    border-style: solid;
+    z-index: 10;
+  }
+  .camera-wrap::before { top: 6px; left: 6px; border-width: 2px 0 0 2px; }
+  .camera-wrap::after { bottom: 6px; right: 6px; border-width: 0 2px 2px 0; }
+
+  /* Side panel */
+  .side-panel {
+    width: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  /* Percentage meter */
+  .meter-block {
+    background: var(--panel);
+    border: 2px solid var(--purple);
+    padding: 14px 12px;
+    position: relative;
+    box-shadow: 0 0 20px rgba(107,10,201,0.4);
+  }
+  .meter-block::before {
+    content: '▶';
+    position: absolute;
+    top: -2px; left: -2px;
+    color: var(--gold);
+    font-size: 10px;
+  }
+  .meter-label {
+    font-size: 0.7rem;
+    color: var(--cyan);
+    letter-spacing: 3px;
+    font-family: 'Oswald', sans-serif;
+    margin-bottom: 8px;
+  }
+  .meter-number {
+    font-size: 3.5rem;
+    line-height: 1;
+    color: var(--gold);
+    text-shadow: 0 0 20px var(--gold), 2px 2px 0 var(--purple);
+    transition: all 0.3s;
+  }
+  .meter-number.high { color: #00FF88; text-shadow: 0 0 30px #00FF88, 2px 2px 0 #003300; }
+  .meter-number.zero { color: #555; text-shadow: none; }
+  .meter-bar-wrap {
+    margin-top: 8px;
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,215,0,0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  .meter-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--purple), var(--gold));
+    width: 0%;
+    transition: width 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: 0 0 10px var(--gold);
+  }
+  .meter-bar.high {
+    background: linear-gradient(90deg, #00AA44, #00FF88);
+    box-shadow: 0 0 10px #00FF88;
+  }
+
+  /* Stand name display */
+  .stand-block {
+    background: var(--panel);
+    border: 2px solid var(--magenta);
+    padding: 12px;
+    text-align: center;
+    box-shadow: 0 0 20px rgba(255,0,170,0.3);
+  }
+  .stand-name {
+    font-size: 1.4rem;
+    color: var(--magenta);
+    text-shadow: 0 0 15px var(--magenta);
+    letter-spacing: 2px;
+  }
+  .stand-cry {
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.6);
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    letter-spacing: 4px;
+    margin-top: 4px;
+  }
+
+  /* Pose detected indicator */
+  .pose-status {
+    background: var(--panel);
+    border: 2px solid #333;
+    padding: 10px 12px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .pose-status.detected {
+    border-color: var(--gold);
+    box-shadow: 0 0 20px rgba(255,215,0,0.5);
+    animation: pulse-border 0.5s ease infinite alternate;
+  }
+  @keyframes pulse-border {
+    from { box-shadow: 0 0 10px rgba(255,215,0,0.3); }
+    to { box-shadow: 0 0 30px rgba(255,215,0,0.8); }
+  }
+  .pose-status-label {
+    font-size: 0.6rem;
+    color: #666;
+    letter-spacing: 3px;
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+  }
+  .pose-status.detected .pose-status-label { color: var(--gold); }
+  .pose-status-value {
+    font-size: 1rem;
+    color: #444;
+    margin-top: 2px;
+  }
+  .pose-status.detected .pose-status-value { color: #fff; }
+
+  /* ORA ORA overlay */
+  .ora-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0;
+  }
+  .ora-overlay.burst {
+    animation: ora-burst 0.6s ease forwards;
+  }
+  .ora-text {
+    font-size: clamp(5rem, 20vw, 12rem);
+    color: var(--gold);
+    text-shadow: 6px 6px 0 var(--purple), -4px -4px 0 #000, 0 0 60px rgba(255,215,0,0.8);
+    animation: ora-spin 0.4s ease;
+  }
+  @keyframes ora-burst {
+    0% { opacity: 1; transform: scale(0.5); }
+    50% { opacity: 1; transform: scale(1.2); }
+    100% { opacity: 0; transform: scale(1.5); }
+  }
+  @keyframes ora-spin {
+    from { transform: rotate(-10deg) scale(0.8); }
+    to { transform: rotate(5deg) scale(1); }
+  }
+
+  /* Manga impact panels */
+  .impact-panel {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 99;
+    opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 30%, rgba(107,10,201,0.6) 100%);
+    transition: opacity 0.2s;
+  }
+  .impact-panel.active { opacity: 1; }
+
+  /* Bottom status bar */
+  .status-bar {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 0.65rem;
+    letter-spacing: 3px;
+    color: rgba(255,255,255,0.3);
+    text-align: center;
+  }
+  .status-bar span { color: var(--cyan); }
+
+  /* Loading state */
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    gap: 12px;
+    transition: opacity 0.5s;
+  }
+  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .loading-text {
+    font-size: 1.2rem;
+    color: var(--gold);
+    letter-spacing: 4px;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .loading-bar-wrap {
+    width: 160px; height: 4px;
+    background: rgba(255,255,255,0.1);
+    overflow: hidden;
+  }
+  .loading-bar-fill {
+    height: 100%;
+    background: var(--gold);
+    animation: load-progress 3s ease forwards;
+  }
+  @keyframes load-progress { from { width:0; } to { width:100%; } }
+
+  /* Keypoints glow */
+  .kp-glow { filter: drop-shadow(0 0 4px var(--cyan)); }
+
+  /* Score breakdown mini */
+  .score-breakdown {
+    background: var(--panel);
+    border: 1px solid rgba(107,10,201,0.5);
+    padding: 8px 10px;
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 0.6rem;
+    letter-spacing: 1px;
+  }
+  .score-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 3px;
+    color: rgba(255,255,255,0.5);
+    transition: color 0.3s;
+  }
+  .score-row.active { color: var(--gold); }
+  .score-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #333;
+    display: inline-block;
+    margin-right: 5px;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .score-row.active .score-dot {
+    background: var(--gold);
+    box-shadow: 0 0 6px var(--gold);
+  }
+</style>
+</head>
+<body>
+
+<div class="speed-lines" id="speedLines"></div>
+<div class="impact-panel" id="impactPanel"></div>
+<div class="ora-overlay" id="oraOverlay"><div class="ora-text" id="oraTxt">ORA!</div></div>
+
+<div id="app">
+  <div class="title-block">
+    <div class="title-main">★ STAR PLATINUM ★</div>
+    <div class="title-sub">JOTARO POSE DETECTOR · ORA ORA ORA</div>
+  </div>
+
+  <div class="main-layout">
+    <!-- Camera -->
+    <div class="camera-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-text">LOADING STAND...</div>
+        <div class="loading-bar-wrap"><div class="loading-bar-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- Side panel -->
+    <div class="side-panel">
+      <div class="meter-block">
+        <div class="meter-label">POSE POWER</div>
+        <div class="meter-number zero" id="meterNum">0%</div>
+        <div class="meter-bar-wrap"><div class="meter-bar" id="meterBar"></div></div>
+      </div>
+
+      <div class="stand-block">
+        <div class="stand-name">STAR PLATINUM</div>
+        <div class="stand-cry">ORA · ORA · ORA</div>
+      </div>
+
+      <div class="pose-status" id="poseStatus">
+        <div class="pose-status-label">STATUS</div>
+        <div class="pose-status-value" id="poseStatusVal">NO POSE</div>
+      </div>
+
+      <div class="score-breakdown" id="scoreBreakdown">
+        <div class="score-row" id="sr-arms"><span class="score-dot"></span>ARMS RAISED</div>
+        <div class="score-row" id="sr-hands"><span class="score-dot"></span>HANDS OUT</div>
+        <div class="score-row" id="sr-lean"><span class="score-dot"></span>BODY LEAN</div>
+        <div class="score-row" id="sr-stance"><span class="score-dot"></span>WIDE STANCE</div>
+        <div class="score-row" id="sr-chin"><span class="score-dot"></span>CHIN DOWN</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar" id="statusBar">
+    <span>AWAITING CAMERA</span> · STAND BY · やれやれだぜ
+  </div>
+</div>
+
+<!-- MediaPipe Pose via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const meterNum = document.getElementById('meterNum');
+const meterBar = document.getElementById('meterBar');
+const poseStatus = document.getElementById('poseStatus');
+const poseStatusVal = document.getElementById('poseStatusVal');
+const speedLines = document.getElementById('speedLines');
+const impactPanel = document.getElementById('impactPanel');
+const oraOverlay = document.getElementById('oraOverlay');
+const oraTxt = document.getElementById('oraTxt');
+const statusBar = document.getElementById('statusBar');
+
+let currentScore = 0;
+let lastOraTime = 0;
+let oraPlaying = false;
+let poseActive = false;
+
+// --- Audio Engine ---
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playStarPlatinumSFX() {
+  ensureAudio();
+  const ac = audioCtx;
+  const now = ac.currentTime;
+
+  // ORA ORA ORA — punching sound synth
+  const oraCount = 5;
+  for (let i = 0; i < oraCount; i++) {
+    const t = now + i * 0.12;
+
+    // Main punch thud
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(160 - i * 8, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.08);
+    gain.gain.setValueAtTime(0.7, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    osc.start(t);
+    osc.stop(t + 0.1);
+
+    // Impact noise burst
+    const bufSize = ac.sampleRate * 0.06;
+    const buf = ac.createBuffer(1, bufSize, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let j = 0; j < bufSize; j++) data[j] = (Math.random() * 2 - 1);
+    const src = ac.createBufferSource();
+    const ng = ac.createGain();
+    const filter = ac.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 800 + i * 100;
+    filter.Q.value = 0.5;
+    src.buffer = buf;
+    src.connect(filter);
+    filter.connect(ng);
+    ng.connect(ac.destination);
+    ng.gain.setValueAtTime(0.5, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    src.start(t);
+    src.stop(t + 0.07);
+  }
+
+  // Final "ORAAAAA" — rising growl
+  const finale = now + oraCount * 0.12;
+  const growl = ac.createOscillator();
+  const growlGain = ac.createGain();
+  const dist = ac.createWaveShaper();
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = Math.tanh(x * 10); }
+  dist.curve = curve;
+  growl.connect(dist);
+  dist.connect(growlGain);
+  growlGain.connect(ac.destination);
+  growl.type = 'sawtooth';
+  growl.frequency.setValueAtTime(80, finale);
+  growl.frequency.exponentialRampToValueAtTime(400, finale + 0.4);
+  growlGain.gain.setValueAtTime(0.6, finale);
+  growlGain.gain.exponentialRampToValueAtTime(0.001, finale + 0.5);
+  growl.start(finale);
+  growl.stop(finale + 0.6);
+
+  // Low bass impact
+  const bass = ac.createOscillator();
+  const bassGain = ac.createGain();
+  bass.connect(bassGain);
+  bassGain.connect(ac.destination);
+  bass.type = 'sine';
+  bass.frequency.setValueAtTime(55, finale);
+  bass.frequency.exponentialRampToValueAtTime(20, finale + 0.3);
+  bassGain.gain.setValueAtTime(1.0, finale);
+  bassGain.gain.exponentialRampToValueAtTime(0.001, finale + 0.35);
+  bass.start(finale);
+  bass.stop(finale + 0.4);
+}
+
+function triggerOraEffect() {
+  const now = Date.now();
+  if (now - lastOraTime < 2000) return;
+  lastOraTime = now;
+
+  const oras = ['ORA!', 'ORA ORA!', 'ORAORAORA!', '★ORA★', 'やれやれだぜ'];
+  oraTxt.textContent = oras[Math.floor(Math.random() * oras.length)];
+
+  oraOverlay.classList.remove('burst');
+  void oraOverlay.offsetWidth;
+  oraOverlay.classList.add('burst');
+  speedLines.classList.add('active');
+  impactPanel.classList.add('active');
+
+  playStarPlatinumSFX();
+
+  setTimeout(() => {
+    speedLines.classList.remove('active');
+    impactPanel.classList.remove('active');
+  }, 800);
+}
+
+// --- Pose Analysis ---
+// Jotaro's iconic 5-finger spread hands pose:
+// 1. Arms raised / outstretched laterally + forward
+// 2. Hands spread wide (wrists above elbows or extended)
+// 3. Body slight forward lean
+// 4. Wide stance (feet apart)
+// 5. Head slightly down (chin tuck)
+
+function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
+function dist2D(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+function angle(a, b, c) {
+  const ab = { x: a.x - b.x, y: a.y - b.y };
+  const cb = { x: c.x - b.x, y: c.y - b.y };
+  const dot = ab.x * cb.x + ab.y * cb.y;
+  const cross = ab.x * cb.y - ab.y * cb.x;
+  return Math.abs(Math.atan2(cross, dot) * 180 / Math.PI);
+}
+
+const scoreRows = {
+  arms: document.getElementById('sr-arms'),
+  hands: document.getElementById('sr-hands'),
+  lean: document.getElementById('sr-lean'),
+  stance: document.getElementById('sr-stance'),
+  chin: document.getElementById('sr-chin'),
+};
+
+function analyzePose(landmarks) {
+  // MediaPipe Pose landmark indices
+  const L = {
+    nose: 0, leftEye: 2, rightEye: 5,
+    leftShoulder: 11, rightShoulder: 12,
+    leftElbow: 13, rightElbow: 14,
+    leftWrist: 15, rightWrist: 16,
+    leftHip: 23, rightHip: 24,
+    leftKnee: 25, rightKnee: 26,
+    leftAnkle: 27, rightAnkle: 28,
+  };
+
+  const get = i => landmarks[i];
+  const scores = {};
+
+  // ---- 1. ARMS RAISED (wrists above or near shoulder level, spread out) ----
+  const ls = get(L.leftShoulder), rs = get(L.rightShoulder);
+  const lw = get(L.leftWrist), rw = get(L.rightWrist);
+  const le = get(L.leftElbow), re = get(L.rightElbow);
+
+  // Wrists should be roughly at shoulder height or above, AND spread wide
+  const leftWristHighEnough = lw.y < ls.y + 0.15; // higher y = lower on screen
+  const rightWristHighEnough = rw.y < rs.y + 0.15;
+  const armsSpread = Math.abs(lw.x - rw.x) > 0.4; // wide spread in x
+  const armsScore = (leftWristHighEnough ? 0.4 : 0) + (rightWristHighEnough ? 0.4 : 0) + (armsSpread ? 0.2 : 0);
+  scores.arms = clamp(armsScore, 0, 1);
+
+  // ---- 2. HANDS EXTENDED (wrists further from body than elbows — reaching out) ----
+  const midShoulderX = (ls.x + rs.x) / 2;
+  const leftExtended = Math.abs(lw.x - midShoulderX) > Math.abs(le.x - midShoulderX);
+  const rightExtended = Math.abs(rw.x - midShoulderX) > Math.abs(re.x - midShoulderX);
+  const elbowAngleLeft = angle(ls, le, lw);
+  const elbowAngleRight = angle(rs, re, rw);
+  // Jotaro extends/bends with palms forward — elbow angle ideally 100-160 deg
+  const leftAngleGood = elbowAngleLeft > 80 && elbowAngleLeft < 175;
+  const rightAngleGood = elbowAngleRight > 80 && elbowAngleRight < 175;
+  const handsScore = (leftExtended ? 0.3 : 0) + (rightExtended ? 0.3 : 0) + (leftAngleGood ? 0.2 : 0) + (rightAngleGood ? 0.2 : 0);
+  scores.hands = clamp(handsScore, 0, 1);
+
+  // ---- 3. BODY LEAN (shoulders shifted forward relative to hips) ----
+  const lh = get(L.leftHip), rh = get(L.rightHip);
+  const midShoulderY = (ls.y + rs.y) / 2;
+  const midHipY = (lh.y + rh.y) / 2;
+  const midShoulderXv = (ls.x + rs.x) / 2;
+  const midHipXv = (lh.x + rh.x) / 2;
+  // Forward lean: shoulders and hips have some x-offset (since camera is front-facing, lean shows as slight offset)
+  // Also vertical: shoulders higher up proportionally
+  const verticalRatio = midHipY - midShoulderY;
+  const shoulderWidth = dist2D(ls, rs);
+  const leanScore = verticalRatio > shoulderWidth * 0.5 ? 1.0 : clamp(verticalRatio / (shoulderWidth * 0.5), 0, 1);
+  scores.lean = leanScore;
+
+  // ---- 4. WIDE STANCE (ankles spread wide relative to shoulder width) ----
+  const la = get(L.leftAnkle), ra = get(L.rightAnkle);
+  const ankleSpread = dist2D(la, ra);
+  const stanceScore = clamp(ankleSpread / (shoulderWidth * 1.4), 0, 1);
+  scores.stance = stanceScore;
+
+  // ---- 5. CHIN/HEAD DOWN (nose y close to or below shoulder y — head tilted) ----
+  const nose = get(L.nose);
+  const headBelowTopRatio = nose.y; // nose.y in normalized 0-1, higher value = lower
+  const headOffset = nose.y - midShoulderY;
+  // Chin down: nose should be just slightly below the shoulder line (not too far, not above)
+  const chinScore = headOffset > -0.05 && headOffset < 0.2 ? 1.0 : clamp(1 - Math.abs(headOffset - 0.08) * 5, 0, 1);
+  scores.chin = chinScore;
+
+  // Weighted total
+  const weights = { arms: 0.30, hands: 0.25, lean: 0.15, stance: 0.20, chin: 0.10 };
+  let total = 0;
+  for (const k in weights) total += (scores[k] || 0) * weights[k];
+
+  return { total, scores };
+}
+
+// --- MediaPipe Setup ---
+let pose;
+
+async function initPose() {
+  pose = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
+
+  pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    smoothSegmentation: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+
+  pose.onResults(onResults);
+
+  await pose.initialize();
+  loadingOverlay.classList.add('hidden');
+  statusBar.innerHTML = '<span>STAND READY</span> · STRIKE YOUR POSE · やれやれだぜ';
+}
+
+let smoothScore = 0;
+
+function onResults(results) {
+  canvas.width = video.videoWidth || canvas.offsetWidth;
+  canvas.height = video.videoHeight || canvas.offsetHeight;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!results.poseLandmarks) {
+    updateScore(0, {});
+    return;
+  }
+
+  const lm = results.poseLandmarks;
+
+  // Draw skeleton with JoJo colors
+  drawConnectors(ctx, lm, POSE_CONNECTIONS, {
+    color: 'rgba(107,10,201,0.8)',
+    lineWidth: 2
+  });
+  drawLandmarks(ctx, lm, {
+    color: '#FFD700',
+    fillColor: '#00FFFF',
+    lineWidth: 1,
+    radius: 4
+  });
+
+  const { total, scores } = analyzePose(lm);
+  updateScore(total, scores);
+}
+
+function updateScore(rawScore, scores) {
+  smoothScore = smoothScore * 0.7 + rawScore * 0.3;
+  const pct = Math.round(smoothScore * 100);
+
+  currentScore = pct;
+
+  // Update meter
+  meterNum.textContent = pct + '%';
+  meterBar.style.width = pct + '%';
+
+  const isHigh = pct >= 60;
+  const isZero = pct < 5;
+
+  meterNum.className = 'meter-number' + (isHigh ? ' high' : isZero ? ' zero' : '');
+  meterBar.className = 'meter-bar' + (isHigh ? ' high' : '');
+
+  // Update status
+  if (pct >= 75) {
+    poseStatusVal.textContent = 'JOTARO POSE!';
+    poseStatus.classList.add('detected');
+    if (!poseActive) {
+      poseActive = true;
+      triggerOraEffect();
+    }
+  } else if (pct >= 50) {
+    poseStatusVal.textContent = 'GETTING THERE...';
+    poseStatus.classList.remove('detected');
+    poseActive = false;
+  } else if (pct >= 20) {
+    poseStatusVal.textContent = 'WEAK POSE';
+    poseStatus.classList.remove('detected');
+    poseActive = false;
+  } else {
+    poseStatusVal.textContent = 'NO POSE';
+    poseStatus.classList.remove('detected');
+    poseActive = false;
+  }
+
+  // Update breakdown rows
+  const keys = ['arms', 'hands', 'lean', 'stance', 'chin'];
+  const ids = ['sr-arms', 'sr-hands', 'sr-lean', 'sr-stance', 'sr-chin'];
+  keys.forEach((k, i) => {
+    const el = document.getElementById(ids[i]);
+    const val = (scores[k] || 0);
+    el.classList.toggle('active', val > 0.5);
+  });
+
+  // Speed lines ambient based on score
+  if (pct > 40) {
+    speedLines.style.opacity = (pct - 40) / 300;
+  } else {
+    speedLines.style.opacity = 0;
+  }
+}
+
+// --- Camera ---
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false
+    });
+    video.srcObject = stream;
+    await new Promise(res => video.onloadedmetadata = res);
+    video.play();
+    statusBar.innerHTML = '<span>CAMERA ON</span> · LOADING STAND MODEL...';
+    await initPose();
+
+    // Process frames
+    const camera = new Camera(video, {
+      onFrame: async () => { await pose.send({ image: video }); },
+      width: 640, height: 480
+    });
+    camera.start();
+  } catch (e) {
+    console.error(e);
+    loadingOverlay.querySelector('.loading-text').textContent = 'CAMERA DENIED';
+    statusBar.innerHTML = '<span>ERROR</span> · ALLOW CAMERA ACCESS';
+  }
+}
+
+// Init on user gesture (required for audio)
+document.addEventListener('click', function initAudio() {
+  ensureAudio();
+  document.removeEventListener('click', initAudio);
+}, { once: true });
+
+startCamera();
+</script>
+</body>
+</html>
